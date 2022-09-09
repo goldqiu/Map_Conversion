@@ -5,26 +5,34 @@
 #include "glog/logging.h"
 
 namespace map_conversion {
-Pointcloud2dProcess::Pointcloud2dProcess(YAML::Node& config_node) {
+Pointcloud2dProcess::Pointcloud2dProcess(YAML::Node& config_node)
+: global_map_data(new CloudData::CLOUD())
+{
 
    Global_map_file = config_node["Global_file_directory"].as<std::string>();
    local_cloud_topic = config_node["local_cloud_frame"].as<std::string>();
-   global_z_adjust = atof((config_node["global_z"].as<std::string>()).c_str());
-   local_z_adjust = atof((config_node["local_z"].as<std::string>()).c_str());
-   cout << "max_angle:" << local_z_adjust << endl;
+   topic_frame_id = config_node["frame_id"].as<std::string>();
+
+   global_max_z_adjust = atof((config_node["global_max_z"].as<std::string>()).c_str());
+   global_min_z_adjust = atof((config_node["global_min_z"].as<std::string>()).c_str());
+   current_max_z_adjust = atof((config_node["current_max_z"].as<std::string>()).c_str());
+   current_min_z_adjust = atof((config_node["current_min_z"].as<std::string>()).c_str());
+
+   global_map_resolution = atof((config_node["2d_global_map_resolution"].as<std::string>()).c_str());
+   current_map_resolution = atof((config_node["2d_current_map_resolution"].as<std::string>()).c_str());
+
+  //  cout << "z_adjust:" << local_z_adjust << endl;
 }
 
-void Pointcloud2dProcess::find_Z_value(CloudData& cloud_data){
-    std::cout << "初始点云数据点数：" << cloud_data.cloud_ptr->points.size() << std::endl;
-    for(int i = 0; i < cloud_data.cloud_ptr->points.size() - 1; i++){
-        cloud_data.cloud_ptr->points[i].z = cloud_data.cloud_ptr->points[i].z +0.7;
-        }
-    for(int i = 0; i < cloud_data.cloud_ptr->points.size() - 1; i++){
-        if(cloud_data.cloud_ptr->points[i].z>max_z){
-            max_z=cloud_data.cloud_ptr->points[i].z;
+void Pointcloud2dProcess::find_Z_value(CloudData::CLOUD_PTR cloud_data){
+    std::cout << "初始点云数据点数：" << cloud_data->points.size() << std::endl;
+
+    for(int i = 0; i < cloud_data->points.size() - 1; i++){
+        if(cloud_data->points[i].z>max_z){
+            max_z=cloud_data->points[i].z;
           }
-        if(cloud_data.cloud_ptr->points[i].z<min_z){
-            min_z=cloud_data.cloud_ptr->points[i].z;
+        if(cloud_data->points[i].z<min_z){
+            min_z=cloud_data->points[i].z;
           }
     }
     std::cout<<"orig max_z="<<max_z<<",min_z="<<min_z<<std::endl;
@@ -32,37 +40,48 @@ void Pointcloud2dProcess::find_Z_value(CloudData& cloud_data){
 
 int Pointcloud2dProcess::global_map_init(void)
 {
-    if (pcl::io::loadPCDFile(Global_map_file, *(global_map_data.cloud_ptr)) == -1)
+    if (pcl::io::loadPCDFile(Global_map_file, *(global_map_data)) == -1)
   {
         PCL_ERROR ("Couldn't read file: %s \n", Global_map_file.c_str());
         return (-1);
   } 
+    LOG(INFO) << "Load global map, size:" << global_map_data->points.size();
+
+    // global_map_filter_ptr_ = std::make_shared<VoxelFilter>(0.2,0.2,0.2);
+
+    // global_map_filter_ptr_->Filter(global_map_data, global_map_data);
+    
+    // LOG(INFO) << "Filtered global map, size:" << global_map_data->points.size();
+
     find_Z_value(global_map_data);
-    PassThroughFilter(global_map_data,global_map_after_filter,false);
+    
+    PassThroughFilter(global_map_data,global_map_no_filter,false,0,0);
+
+    PassThroughFilter(global_map_data,global_map_after_filter,false,global_max_z_adjust,global_min_z_adjust);
 }
 
-void Pointcloud2dProcess::PassThroughFilter(CloudData& pcd_cloud,CloudData& cloud_after_PassThrough, const bool &flag_in)
+void Pointcloud2dProcess::PassThroughFilter(CloudData::CLOUD_PTR  pcd_cloud,CloudData& cloud_after_PassThrough, const bool &flag_in,double z_max, double z_min)
 {
     /*方法一：直通滤波器对点云进行处理。*/
     pcl::PassThrough<pcl::PointXYZ> passthrough;
-    passthrough.setInputCloud(pcd_cloud.cloud_ptr);//输入点云
+    passthrough.setInputCloud(pcd_cloud);//输入点云
     passthrough.setFilterFieldName("z");//对z轴进行操作
-    passthrough.setFilterLimits(min_z+local_z_adjust+global_z_adjust, max_z);//设置直通滤波器操作范围
+    passthrough.setFilterLimits(min_z+z_min, max_z-z_max);//设置直通滤波器操作范围
     passthrough.setFilterLimitsNegative(flag_in);//true表示保留范围外，false表示保留范围内
     passthrough.filter(*cloud_after_PassThrough.cloud_ptr);//执行滤波，过滤结果保存在 cloud_after_PassThrough
     std::cout << "直通滤波后点云数据点数：" << cloud_after_PassThrough.cloud_ptr->points.size() << std::endl;
-    for(int i = 0; i < cloud_after_PassThrough.cloud_ptr->points.size() - 1; i++){
-     if(cloud_after_PassThrough.cloud_ptr->points[i].z>max_z){
-       max_z=cloud_after_PassThrough.cloud_ptr->points[i].z;
-     }
-     if(cloud_after_PassThrough.cloud_ptr->points[i].z<min_z){
-       min_z=cloud_after_PassThrough.cloud_ptr->points[i].z;
-     }
-     }
-    std::cout<<"aft pass through filter: max_z="<<max_z<<",min_z="<<min_z<<std::endl;
+    // for(int i = 0; i < cloud_after_PassThrough.cloud_ptr->points.size() - 1; i++){
+    //  if(cloud_after_PassThrough.cloud_ptr->points[i].z>max_z){
+    //    max_z=cloud_after_PassThrough.cloud_ptr->points[i].z;
+    //  }
+    //  if(cloud_after_PassThrough.cloud_ptr->points[i].z<min_z){
+    //    min_z=cloud_after_PassThrough.cloud_ptr->points[i].z;
+    //  }
+    //  }
+    // std::cout<<"aft pass through filter: max_z="<<max_z<<",min_z="<<min_z<<std::endl;
 }
 
-void Pointcloud2dProcess::Pointcloud_to_2d_grid(const CloudData& pcd_cloud, nav_msgs::OccupancyGrid& msg)
+void Pointcloud2dProcess::Pointcloud_to_2d_grid(const CloudData& pcd_cloud, nav_msgs::OccupancyGrid& msg, double map_resolution)
 {
   msg.header.seq = 0;
   msg.header.stamp = ros::Time::now();

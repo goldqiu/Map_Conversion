@@ -26,6 +26,11 @@ void CloudPublisher::PublishData(CloudData::CLOUD_PTR&  cloud_ptr_input, ros::Ti
 
     cloud_ptr_output->header.stamp = time;
     cloud_ptr_output->header.frame_id = frame_id_;
+
+    if (publisher_.getNumSubscribers() == 0)
+    {
+            return;
+    }
     publisher_.publish(*cloud_ptr_output);
 }
 

@@ -10,6 +10,9 @@ GridNodePtr *** GridNodeMap;
 namespace map_conversion {
 Pointcloud3dProcess::Pointcloud3dProcess(YAML::Node& config_node) {
    //三维栅格初始化
+   _x_size = atof((config_node["3d_x_size"].as<std::string>()).c_str());
+   _y_size = atof((config_node["3d_y_size"].as<std::string>()).c_str());
+   _z_size = atof((config_node["3d_z_size"].as<std::string>()).c_str());
    _map_lower << -_y_size/2.0, -_y_size/2.0, 0.0;
    _map_upper << +_x_size/2.0, +_y_size/2.0, _z_size;
 	
@@ -99,6 +102,7 @@ void Pointcloud3dProcess::initGridMap(double _resolution, Eigen::Vector3d global
         }
     }
 }
+
 void Pointcloud3dProcess::pointcloud_to_3dGridMap(CloudData& cloud_data,CloudData& cloud_inf)
 {
     pcl::PointXYZ pt, pt_inf;
